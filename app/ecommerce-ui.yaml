@@ -23,7 +23,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
   namespace: ecommerce
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: ecommerce-ui
