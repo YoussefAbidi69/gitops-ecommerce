@@ -23,6 +23,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: data
+  ignoreDifferences:
+    # Statut niché par le serveur dans le template PVC : l'apply ne peut
+    # pas le retirer, on l'exclut du diff (boucle OutOfSync sinon).
+    - group: apps
+      kind: StatefulSet
+      name: mongodb
+      jsonPointers:
+        - /spec/volumeClaimTemplates/0/status
   syncPolicy:
     automated:
       prune: true
