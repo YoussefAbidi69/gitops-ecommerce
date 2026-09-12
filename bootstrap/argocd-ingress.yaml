@@ -12,10 +12,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - ARGOCD_HOST_PLACEHOLDER
+        - argocd.20.188.58.81.nip.io
       secretName: argocd-tls
   rules:
-    - host: ARGOCD_HOST_PLACEHOLDER
+    - host: argocd.20.188.58.81.nip.io
       http:
         paths:
           - path: /
