@@ -29,8 +29,8 @@ spec:
     - group: apps
       kind: StatefulSet
       name: mongodb
-      jsonPointers:
-        - /spec/volumeClaimTemplates/0/status
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[0].status
   syncPolicy:
     automated:
       prune: true
