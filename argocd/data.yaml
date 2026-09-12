@@ -39,7 +39,7 @@ spec:
       - CreateNamespace=true
       # Les CR CNPG/Kafka sont volumineuses : le client-side apply bute sur la
       # limite de taille des annotations kubectl. ServerSideApply délègue au serveur.
-      - ServerSideApply=true
+      
     retry:
       limit: 5
       backoff:
