@@ -1,0 +1,11 @@
+data:
+  resource.customizations.health.networking.k8s.io_Ingress: |
+    hs = {}
+    if obj.spec.rules ~= nil then
+      hs.status = "Healthy"
+      hs.message = "Ingress rules present (Traefik does not publish LB status)"
+    else
+      hs.status = "Progressing"
+      hs.message = "No ingress rules defined"
+    end
+    return hs
