@@ -1,0 +1,83 @@
+# Redis externe miniature pour GitLab (chart 10.x : plus de Redis "bundled").
+# Rôle : cache Rails, sessions, files d'attente Sidekiq (= les jobs CI en attente).
+# Sans Redis, webservice et sidekiq refusent de démarrer — c'est un prérequis dur.
+# Pas d'authentification : le Service est ClusterIP, inaccessible hors cluster.
+#
+# STOCKAGE : volontairement un emptyDir, PAS un PVC. Pourquoi ?
+#   Le budget disques est la contrainte dure du cluster : 4 disques par nœud
+#   B2s_v2, 2 nœuds = 8 au total. On est à 4 (pg x2, kafka, mongo), GitLab ajoute
+#   pg-gitlab + gitaly + minio = 7/8. Un PVC Redis ferait 8/8 : à la limite, au
+#   moindre déséquilibre de placement un pod resterait Pending.
+#   Or Redis ne contient ici QUE du reconstructible (cache, sessions, file
+#   d'attente). Les vraies données sont dans PostgreSQL et dans MinIO.
+#   -> on garde un disque libre en réserve. Limite assumée (à écrire au rapport) :
+#      un redémarrage du pod Redis déconnecte les sessions et perd les jobs en
+#      attente. Sans gravité pour une démo.
+# Coût : 0 disque. À appliquer à l'étape A5 du guide.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: gitlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999          # user `redis` de l'image officielle
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--appendonly", "yes"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          resources:
+            requests: {cpu: "50m", memory: "128Mi"}
+            limits: {memory: "256Mi"}
+          startupProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 15
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 10
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: gitlab
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  selector:
+    app: redis

@@ -1,0 +1,51 @@
+# EXEMPLE — pipeline GitLab CI avec Docker-in-Docker + mise à jour GitOps.
+# Ce fichier est une DOC VIVANTE : il vit dans le repo SOURCE (code Java), pas ici.
+# Montré : 1 service (order-service). Répéter le motif build:X pour les autres.
+#
+# Variables CI/CD à créer dans le projet GitLab (Settings > CI/CD > Variables, masked) :
+#   GHCR_USER          user GitHub (ex: youssefabidi69)
+#   GHCR_WRITE_TOKEN   token GitHub scope write:packages (push des images)
+#   GITOPS_PUSH_TOKEN  token GitHub scope repo (push du bump de tag vers gitops-ecommerce)
+#
+# Tags du runner : si le runner a le tag `dind`, ajouter `tags: [dind]` à chaque job.
+
+stages: [build, gitops]
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""     # dialogue en clair intra-pod (voir runner-values-dind.yaml)
+  DOCKER_DRIVER: overlay2
+
+build:order-service:
+  stage: build
+  image: docker:24-cli
+  services:
+    - name: docker:24-dind
+      alias: docker
+  script:
+    - docker build
+      -t ghcr.io/$GHCR_USER/order-service:$CI_COMMIT_SHORT_SHA
+      -f order-service/Dockerfile
+      ./ecommerce-microservices-main
+    - echo "$GHCR_WRITE_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+    - docker push ghcr.io/$GHCR_USER/order-service:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# GitOps : le pipeline ne touche JAMAIS au cluster (pas de kubeconfig dans le CI).
+# Il met à jour le tag dans le repo gitops ; ArgoCD détecte le commit et déploie.
+bump:gitops:
+  stage: gitops
+  image: alpine/git:2.43.0
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - wget -qO- https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz | tar xz -C /usr/local/bin
+  script:
+    - git clone https://oauth2:$GITOPS_PUSH_TOKEN@github.com/YoussefAbidi69/gitops-ecommerce.git
+    - cd gitops-ecommerce/app
+    - kustomize edit set image ghcr.io/$GHCR_USER/order-service=ghcr.io/$GHCR_USER/order-service:$CI_COMMIT_SHORT_SHA
+    - git -c user.email=ci@local -c user.name=gitlab-ci commit -am "ci: order-service -> $CI_COMMIT_SHORT_SHA"
+    - git push
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

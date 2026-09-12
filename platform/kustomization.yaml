@@ -1,0 +1,8 @@
+# Kustomize entrypoint — couche platform.
+# ArgoCD détecte et rend ce fichier automatiquement (pas de `kustomize build` à lancer).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - storageclasses.yaml
+  - cert-manager-issuers.yaml

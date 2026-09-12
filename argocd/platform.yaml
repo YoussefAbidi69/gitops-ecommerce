@@ -1,0 +1,29 @@
+# ArgoCD Application — platform (namespaces, StorageClasses, ClusterIssuers).
+# Vague 0 de l'app root : tout le reste suppose que les namespaces existent.
+#
+# NOTE : sync auto SANS prune, volontairement. Un mauvais commit ne doit jamais
+# effacer automatiquement un Namespace ou une StorageClass (données détruites =
+# irrécupérable). Le prune ici reste manuel : `argocd app sync platform --prune`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YoussefAbidi69/gitops-ecommerce.git
+    targetRevision: HEAD
+    path: platform
+  destination:
+    server: https://kubernetes.default.svc
+    # Placeholder : les ressources ici sont cluster-scoped ou portent déjà leur namespace.
+    namespace: default
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

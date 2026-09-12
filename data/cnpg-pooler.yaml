@@ -1,0 +1,38 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+# PgBouncer pooler — step 3.2b
+#
+#   kubectl apply -f k8s/data/cnpg-pooler.yaml
+#   kubectl get pooler -n data
+#
+# Creates Service `pg-pooler-rw`. THIS is the hostname the Spring services
+# will use in their JDBC urls (never pg-rw directly).
+#
+# Why a pooler at all: 5 JVM services x Hikari pools would open 50+ connections
+# that sit idle 90% of the time, against a Postgres tuned for max_connections
+# 100 on a 1Gi container. PgBouncer multiplexes hundreds of client connections
+# onto a couple dozen server connections, and absorbs connection storms when
+# several JVMs boot at once.
+#
+# poolMode transaction: a server connection is borrowed only for the duration
+# of a transaction — the most efficient mode. Spring/Hibernate must not rely
+# on session-level state (advisory locks, SET commands) across transactions;
+# our services don't.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+spec:
+  cluster:
+    name: pg
+  instances: 1          # one PgBouncer is enough; it is stateless and cheap
+  type: rw              # routes to the current primary, follows failovers
+  pgbouncer:
+    poolMode: transaction   # borrow a server conn only for the duration of a txn
+    parameters:
+      max_client_conn: "200"
+      default_pool_size: "20"

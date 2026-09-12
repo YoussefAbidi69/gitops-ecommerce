@@ -1,0 +1,153 @@
+# MinIO single-node : le stockage objet S3 externe de GitLab (chart 10.x : fini le MinIO "bundled").
+# Rôle : artifacts CI, uploads, LFS, packages — sans S3, ces fonctions sont cassées.
+# Single-node + 1 disque : non-HA, assumé pour une démo (en prod : cluster MinIO ou S3 géré).
+# Coût : +1 disque Azure 10Gi (7/8 au total). À appliquer à l'étape A6 du guide.
+#
+# Les credentials vivent dans le Secret `minio-credentials` (créé à l'étape A6, JAMAIS en git).
+# Console d'admin : kubectl port-forward svc/minio -n gitlab 9001:9001 (login = rootUser/rootPassword du Secret).
+# Les 9 buckets créés ci-dessous sont les noms EXACTS attendus par défaut par le chart
+# GitLab (docs > globals > Specify buckets). Avec un S3 externe, personne ne les crée pour nous.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: gitlab
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: azuredisk-ssd-retain
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: gitlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001            # le volume frais appartient à root ; fsGroup le rend inscriptible
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          # ATTENTION : ne PAS utiliser `latest`. MinIO a (a) retiré les fonctions
+          # d'administration de la console des images récentes et (b) arrêté de
+          # publier de nouvelles images Docker fin 2025. On épingle donc la
+          # dernière release connue pour avoir la console complète.
+          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          env:
+            - name: HOME
+              value: /tmp        # UID 1001 sans entrée /etc/passwd : HOME explicite, évite les erreurs de config
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: minio-credentials, key: rootUser}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: minio-credentials, key: rootPassword}}
+          resources:
+            requests: {cpu: "100m", memory: "256Mi"}
+            limits: {memory: "512Mi"}
+          startupProbe:
+            httpGet: {path: /minio/health/live, port: 9000}
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: {path: /minio/health/live, port: 9000}
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: {path: /minio/health/ready, port: 9000}
+            periodSeconds: 10
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: gitlab
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: s3
+    - port: 9001
+      targetPort: 9001
+      name: console
+  selector:
+    app: minio
+---
+# One-shot : crée les buckets attendus par le chart (avec un S3 externe, personne
+# d'autre ne le fait — le job auto-create n'existe que pour le MinIO "bundled").
+# Idempotent (`--ignore-existing`) : ré-appliquer ne casse rien.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-make-buckets
+  namespace: gitlab
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: minio-make-buckets
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /tmp        # mc écrit sa config (~/.mc) : /tmp est toujours inscriptible
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: minio-credentials, key: rootUser}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: minio-credentials, key: rootPassword}}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+              for b in gitlab-artifacts git-lfs gitlab-packages gitlab-uploads gitlab-mr-diffs gitlab-terraform-state gitlab-ci-secure-files gitlab-dependency-proxy gitlab-pages; do
+                mc mb --ignore-existing local/$b
+              done
+              mc ls local/
+          resources:
+            requests: {cpu: "50m", memory: "64Mi"}
+            limits: {memory: "128Mi"}

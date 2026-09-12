@@ -1,0 +1,80 @@
+# =============================================================================
+# Cluster PostgreSQL DÉDIÉ à GitLab, en version 17 — étape A3 du guide
+# =============================================================================
+# POURQUOI UN CLUSTER SÉPARÉ ?
+#   Le cluster `pg` existant tourne en PostgreSQL 18.4 (image par défaut de la
+#   version de CNPG installée). Or la matrice de support de GitLab est stricte :
+#
+#     | GitLab | Chart | PG min | PG max |
+#     |--------|-------|--------|--------|
+#     | 19.x   | 10.x  | 17.x   | 17.x   |   <- nous (chart 10.3.1 = GitLab 19.3)
+#     | 18.x   | 9.x   | 16.5   | 17.x   |
+#     | 17.x   | 8.x   | 14.14  | 16.x   |
+#
+#   => PG 18 n'est supporté par AUCUNE version de GitLab.
+#   Et on ne peut pas rétrograder le cluster `pg` : CNPG ne fait pas de downgrade
+#   de version majeure en place, et il héberge order_db / payment_db / shipping_db.
+#   => on crée un 2e cluster, épinglé en 17.
+#
+# CHOIX ASSUMÉS (à écrire tels quels dans le rapport) :
+#   - instances: 1  : pas de standby. C'est une instance de démo pour la partie CI,
+#                     et surtout ça économise un disque Azure (budget : 4 disques
+#                     par nœud B2s_v2, 2 nœuds = 8 au total, on vise 7/8).
+#                     En prod : 2 instances + anti-affinité, comme le cluster `pg`.
+#   - imageName épinglé : `17.6-system-trixie`, l'entrée `major: 17` du catalogue
+#                     d'images officiel CNPG. Sans épinglage, l'opérateur utiliserait
+#                     sa version par défaut (18.x) et on retomberait sur le problème.
+#   - bootstrap.initdb : crée la base ET son propriétaire au premier démarrage.
+#                     GitLab exige une base VIDE : c'est le cas ici, rien d'autre
+#                     n'écrira dedans.
+#
+# POURQUOI LE NAMESPACE `ecommerce` ET PAS `data` ?
+#   Consigne : on ne touche plus au namespace `data`. Le cluster `pg` qui y vit
+#   (PostgreSQL 18.4) héberge order_db / payment_db / shipping_db et reste
+#   exactement comme il est. Le cluster GitLab est donc créé dans `ecommerce`,
+#   à côté des manifestes applicatifs. L'opérateur CNPG est cluster-wide : il le
+#   verra et le gérera pareil.
+#
+# Ce que l'opérateur crée ENSUITE tout seul (ne pas les créer à la main) :
+#   - le Service  `pg-gitlab-rw`   -> pg-gitlab-rw.ecommerce.svc.cluster.local
+#   - les Secrets `pg-gitlab-app`        (user applicatif `app`)
+#                 `pg-gitlab-superuser`  (user `postgres`, pour les extensions)
+# =============================================================================
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-gitlab
+  namespace: ecommerce
+spec:
+  instances: 1
+
+  # L'image EXACTE pour rester sur PostgreSQL 17 (entrée major:17 du catalogue CNPG).
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6-system-trixie
+
+  # La base est créée vide au bootstrap, avec `app` comme propriétaire.
+  bootstrap:
+    initdb:
+      database: gitlabhq_production
+      owner: app
+
+  storage:
+    storageClass: azuredisk-premium-retain   # même classe que le cluster `pg`
+    size: 8Gi
+
+  # Même gabarit que le cluster `pg` : partagé entre GitLab (webservice + sidekiq
+  # + migrations) et rien d'autre, 100 connexions suffisent.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  postgresql:
+    parameters:
+      shared_buffers: 256MB
+      effective_cache_size: 768MB
+      work_mem: 4MB
+      maintenance_work_mem: 64MB
+      max_connections: "100"

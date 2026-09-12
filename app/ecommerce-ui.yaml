@@ -1,0 +1,71 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-ui
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
+  selector:
+    app: ecommerce-ui
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-ui
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecommerce-ui
+  template:
+    metadata:
+      labels:
+        app: ecommerce-ui
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ecommerce-ui
+          image: ghcr.io/youssefabidi69/ecommerce-ui:latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8080
+          env:
+            - name: API_UPSTREAM
+              value: "http://api-gateway:8080"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 15

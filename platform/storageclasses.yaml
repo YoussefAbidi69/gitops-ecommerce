@@ -1,0 +1,69 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+# StorageClasses — step 2.1
+#
+# The cluster ships with `azuredisk-standard` (StandardSSD_LRS, Delete,
+# WaitForFirstConsumer, allowVolumeExpansion=false). That is a reasonable default
+# for scratch work, but two properties make it wrong for databases:
+#
+#   reclaimPolicy: Delete        -> `kubectl delete pvc` destroys the Azure disk,
+#                                   and the data, with no undo
+#   allowVolumeExpansion: false  -> a full disk cannot be grown; the only path is a
+#                                   dump/restore into a new PVC
+#
+# StorageClass parameters are immutable after creation, so rather than fight the
+# existing one we add purpose-built classes. Existing PVCs are unaffected.
+#
+#   kubectl apply -f k8s/platform/storageclasses.yaml
+#   kubectl get sc
+
+---
+# For CloudNativePG.
+#
+# Premium_LRS, not StandardSSD_LRS, for one reason: Postgres fsyncs the WAL on every
+# commit, and this cluster has no separate WAL volume (only 4 data disks per node),
+# so commit latency and query reads share one disk. Premium gives provisioned IOPS
+# and consistent low latency; Standard SSD gives ~500 IOPS on a small disk with no
+# latency guarantee, which shows up as saga p95 jitter under load.
+#
+# Cost note: Azure bills Premium disks in fixed tiers. A 20Gi request is provisioned
+# and billed as a 32GiB P4 (~EUR 5/month each, 2 instances = ~EUR 10/month). If that
+# is not worth it, switch this to StandardSSD_LRS -- but then treat disk IOPS as a
+# candidate bottleneck when reading phase 7 results, rather than assuming the
+# application is at fault.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azuredisk-premium-retain
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+# Retain: deleting the PVC leaves the Azure disk in place as a Released PV. You then
+# clean it up deliberately. Delete is the right default for stateless scratch space
+# and the wrong one for the only copy of your order data.
+reclaimPolicy: Retain
+# WaitForFirstConsumer: the disk is created only once a pod is scheduled, so it lands
+# in the same zone as that pod. With Immediate binding the disk can be provisioned in
+# a zone where the pod cannot run, and the pod stays Pending forever.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+
+---
+# For Kafka and MongoDB.
+#
+# StandardSSD is fine here. Kafka writes sequentially to the log and relies on the
+# page cache for reads; MongoDB holds inventory and notification records that the
+# saga can rebuild. Neither has Postgres's per-commit fsync latency sensitivity.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azuredisk-ssd-retain
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: StandardSSD_LRS
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

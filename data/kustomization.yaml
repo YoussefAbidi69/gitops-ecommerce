@@ -1,0 +1,13 @@
+# Kustomize entrypoint — couche data (CNPG, Kafka, Mongo).
+# L'ordre de démarrage est géré par les sync-waves ArgoCD dans chaque fichier,
+# pas par l'ordre de cette liste (rappel : cluster/kafka/mongo vague 0,
+# databases+pooler vague 1, topics vague 2).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cnpg-cluster.yaml
+  - cnpg-databases.yaml
+  - cnpg-pooler.yaml
+  - kafka.yaml
+  - kafka-topics.yaml
+  - mongodb.yaml

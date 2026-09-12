@@ -1,0 +1,56 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: order-events
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 6
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: inventory-events
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 6
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: payment-events
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 6
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: shipping-events
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 6
+  replicas: 1

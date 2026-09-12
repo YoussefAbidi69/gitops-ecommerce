@@ -1,0 +1,59 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+# The three business databases — step 3.2b
+#
+#   kubectl apply -f k8s/data/cnpg-databases.yaml
+#   kubectl get database -n data
+#
+# One Database CR per microservice database, same layout as docker-compose's
+# postgres (order_db / payment_db / shipping_db) so application config barely
+# changes. The operator runs CREATE DATABASE + GRANT on the primary;
+# replication carries the result to the standby automatically.
+#
+# owner: `app` — the default application user CNPG created with the cluster
+# (its credentials live in Secret `pg-app`). One shared app user is fine at
+# this scale; per-service users are a Phase 9 hardening option.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: order-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+spec:
+  cluster:
+    name: pg
+  name: order_db
+  owner: app
+  ensure: present
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: payment-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+spec:
+  cluster:
+    name: pg
+  name: payment_db
+  owner: app
+  ensure: present
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: shipping-db
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+spec:
+  cluster:
+    name: pg
+  name: shipping_db
+  owner: app
+  ensure: present

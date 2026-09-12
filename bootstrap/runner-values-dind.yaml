@@ -1,0 +1,48 @@
+# Runner GitLab (chart gitlab/gitlab-runner) : exécuteur Kubernetes + Docker-in-Docker.
+# Install, commande par commande (guide, partie C) :
+#   1. créer le token dans l'UI GitLab (Admin Area > Runners > New runner) -> glrt-...
+#   2. helm upgrade --install gitlab-runner gitlab/gitlab-runner -n gitlab \
+#        -f bootstrap/runner-values-dind.yaml --set runnerToken='glrt-...'
+# Le token NE SE COMMITTE JAMAIS : il transite uniquement en --set.
+#
+# Comment le DinD fonctionne ici :
+# - le runner (manager) crée un pod par job dans le namespace gitlab ;
+# - le job utilise `services: [docker:24-dind]` (voir examples/.gitlab-ci.yml) ;
+# - `privileged: true` est OBLIGATOIRE des deux côtés (daemon DinD + conteneur de build) ;
+# - DOCKER_TLS_CERTDIR="" => dialogue en clair sur tcp://docker:2375 (acceptable :
+#   tout reste dans le même pod, jamais exposé hors cluster).
+
+# URL INTERNE (ClusterIP) : le runner parle à GitLab sans sortir du cluster
+# (pas de dépendance au DNS nip.io ni à Traefik). <release>-webservice-default:8181.
+gitlabUrl: http://gitlab-webservice-default.gitlab.svc:8181/
+# runnerToken: passé en --set, jamais écrit ici.
+
+concurrent: 2      # 2 jobs max en parallèle : chaque job DinD consomme ~1 vCPU + 2Gi
+checkInterval: 15
+rbac:
+  create: true
+
+runners:
+  privileged: true
+  config: |
+    [[runners]]
+      [runners.kubernetes]
+        namespace = "gitlab"
+        image = "ubuntu:22.04"
+        privileged = true
+        # pods de build
+        cpu_request = "100m"
+        memory_request = "256Mi"
+        cpu_limit = "1"
+        memory_limit = "2Gi"
+        # conteneurs de service (le daemon docker:dind)
+        service_cpu_request = "100m"
+        service_memory_request = "256Mi"
+        service_cpu_limit = "1"
+        service_memory_limit = "1Gi"
+      # Volume partagé pour les certificats du daemon DinD (requis par le chart
+      # dès que privileged=true ; inutilisé en clair mais inoffensif).
+      [[runners.kubernetes.volumes.empty_dir]]
+        name = "docker-certs"
+        mount_path = "/certs/client"
+        medium = "Memory"

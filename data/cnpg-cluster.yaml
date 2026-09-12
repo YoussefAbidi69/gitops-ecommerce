@@ -1,0 +1,72 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+# CloudNativePG cluster — step 3.2
+#
+#   kubectl apply -f k8s/data/cnpg-cluster.yaml
+#   kubectl get cluster -n data -w          # watch until Healthy
+#
+# This single file asks the operator for a highly-available-ish PostgreSQL:
+#   primary + 1 hot standby, each with its own Premium Azure disk.
+# The operator then creates: pods, PVCs, Services (pg-rw / pg-ro / pg-r),
+# Secrets with credentials, and keeps reconciling: if the primary pod dies,
+# the standby is promoted.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+  namespace: data
+spec:
+  # 2 instances: primary + hot standby. CNPG does NOT need an odd number —
+  # it uses the Kubernetes API as arbiter, not Raft quorum between Postgres nodes.
+  instances: 2
+
+  # Data disk per instance. Premium because Postgres fsyncs the WAL to disk on
+  # every commit — StandardSSD latency would land in every order-creation time.
+  # 8Gi keeps this in the P2 price bracket (~$1.5/mo per disk). No separate
+  # walStorage: one volume keeps disk count low (max 4 data disks per B2s_v2).
+  storage:
+    storageClass: azuredisk-premium-retain
+    size: 8Gi
+
+  # --- placement: the two instances MUST land on different nodes.
+  # With 2 workers this is exact-fit. Rationale: if both instances share a node
+  # and that node dies, we lose the whole database despite paying for two copies.
+  # `required` makes the scheduler refuse same-node placement instead of just
+  # preferring it.
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+
+  # --- memory: shared_buffers 256MB inside a 1Gi limit is the classic 25% rule.
+  # requests get the pod scheduled; the LIMIT is memory-only on purpose —
+  # no CPU limit, so Postgres can use spare cycles on these burstable nodes.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # --- Postgres tuning for a small box.
+  # max_connections 100 because the Pooler (next file) multiplexes our app
+  # connections; services never talk to Postgres directly.
+  postgresql:
+    parameters:
+      shared_buffers: 256MB
+      effective_cache_size: 768MB
+      work_mem: 4MB
+      maintenance_work_mem: 64MB
+      max_connections: "100"
+      log_min_duration_statement: "500"   # log queries slower than 500ms
+      # shared_preload_libraries is a FIXED parameter: the operator owns it and the
+      # webhook rejects any attempt to set it via `parameters`. Instead we request
+      # the *feature*: seeing any pg_stat_statements.* parameter makes the operator
+      # load the library itself and CREATE EXTENSION it in every database.
+      pg_stat_statements.track: all
+
+  # Smart shutdown: finish in-flight transactions before the pod exits,
+  # so failovers and node drains don't kill orders mid-commit.
+  smartShutdownTimeout: 60

@@ -1,0 +1,83 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8082
+      targetPort: 8082
+      name: http
+  selector:
+    app: inventory-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inventory-service
+          image: ghcr.io/youssefabidi69/inventory-service:latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: ecommerce-common
+          env:
+            - name: MONGODB_URI
+              value: "mongodb://mongodb.data.svc.cluster.local:27017/inventory"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              memory: "768Mi"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            periodSeconds: 15
+            failureThreshold: 3

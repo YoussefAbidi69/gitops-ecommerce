@@ -1,0 +1,25 @@
+# Root Application (App of Apps) — le SEUL manifeste appliqué à la main :
+#
+#   kubectl apply -n argocd -f argocd/root.yaml
+#
+# Elle pointe ArgoCD vers le dossier argocd/ (les 3 Applications ci-dessus).
+# À partir de là, git est la seule façon de changer le cluster :
+# édit -> commit -> push -> Argo synchronise (platform 0, data 1, app 2).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YoussefAbidi69/gitops-ecommerce.git
+    targetRevision: HEAD
+    path: argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

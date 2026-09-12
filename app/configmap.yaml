@@ -1,0 +1,16 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-common
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  namespace: ecommerce
+data:
+  EUREKA_SERVER_URL: "http://service-registry.ecommerce.svc.cluster.local:8761/eureka/"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-cluster-kafka-bootstrap.data.svc.cluster.local:9092"
+  POSTGRES_HOST: "pg-pooler.data.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  MONGODB_HOST: "mongodb.data.svc.cluster.local"
+  MONGODB_PORT: "27017"
+  JAVA_OPTS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"

@@ -1,0 +1,90 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+apiVersion: v1
+kind: Service
+metadata:
+  name: shipping-service
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8085
+      targetPort: 8085
+      name: http
+  selector:
+    app: shipping-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipping-service
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shipping-service
+  template:
+    metadata:
+      labels:
+        app: shipping-service
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: shipping-service
+          image: ghcr.io/youssefabidi69/shipping-service:latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8085
+          envFrom:
+            - configMapRef:
+                name: ecommerce-common
+          env:
+            - name: POSTGRES_DB
+              value: "shipping_db"
+            - name: POSTGRES_USER
+              value: "app"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-app
+                  key: password
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              memory: "768Mi"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8085
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8085
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8085
+            periodSeconds: 15
+            failureThreshold: 3

@@ -1,0 +1,38 @@
+# =============================================================================
+# La base de GitLab sur le cluster CNPG EXISTANT `pg` — étape A3 du guide
+# =============================================================================
+# POURQUOI ON RÉUTILISE LE CLUSTER EXISTANT (et pas un 2e PostgreSQL) :
+#   Le cluster `pg` (namespace data) tourne en PostgreSQL 18.4. Longtemps, la
+#   matrice officielle disait « GitLab 19.x => PG 17.x min ET max », ce qui
+#   aurait imposé un 2e cluster épinglé en 17.
+#   MAIS les release notes de GitLab 19.3 annoncent : « PostgreSQL 18.4 option
+#   available for fresh installs ». Autrement dit l'application SAIT tourner
+#   sur 18.4 — et c'est précisément la version de ton cluster.
+#   => on tente avec l'existant : 0 cluster de plus, 0 disque de plus.
+#
+# QU'EST-CE QUE ÇA CHANGE POUR L'EXISTANT ? RIEN.
+#   C'est une opération ADDITIVE : l'opérateur exécute
+#       CREATE DATABASE gitlabhq_production OWNER app;
+#   sur le primaire, et la réplication la porte sur le standby.
+#   order_db / payment_db / shipping_db ne sont ni lues ni modifiées, aucun
+#   redémarrage du cluster. C'est exactement le même motif que les 3 bases
+#   déjà en place (voir data/cnpg-databases.yaml).
+#
+# PLAN B (si les migrations GitLab refusent PG 18) : le fichier
+#   bootstrap/gitlab-cnpg-cluster.yaml contient un cluster `pg-gitlab` dédié,
+#   épinglé en PostgreSQL 17.6, dans le namespace ecommerce. Il suffit de
+#   l'appliquer et de changer une ligne dans gitlab-values-minimal.yaml
+#   (global.psql.host -> pg-gitlab-rw.ecommerce.svc.cluster.local).
+# =============================================================================
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: gitlabhq-production
+  namespace: data
+spec:
+  cluster:
+    name: pg
+  name: gitlabhq_production
+  owner: app          # l'utilisateur applicatif existant (secret `pg-app`)
+  ensure: present

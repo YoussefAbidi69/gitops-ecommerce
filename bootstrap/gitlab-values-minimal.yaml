@@ -1,0 +1,180 @@
+# =============================================================================
+# GitLab CE minimal pour le cluster de stage — CHART 10.3.1 (= GitLab v19.3.1)
+# =============================================================================
+# BUT : instance de DÉMO pour la partie CI du stage. Pas de la prod.
+#
+# !!! CE FICHIER EST UN TEMPLATE !!!
+#   `domain` contient le marqueur PUBLIC_IP_PLACEHOLDER. On ne l'édite PAS :
+#   on passe l'IP au moment du helm, avec
+#       --set global.hosts.domain=${PUBLIC_IP}.nip.io
+#   (le domaine = <IP>.nip.io ; le chart ajoute tout seul le préfixe -> gitlab.<IP>.nip.io)
+#
+# ---------------------------------------------------------------------------
+# CE QU'IL FAUT SAVOIR SUR LE CHART 10.x / GitLab 19.x
+# ---------------------------------------------------------------------------
+# 1. Les sous-charts "bundled" PostgreSQL, Redis et MinIO ONT ÉTÉ SUPPRIMÉS.
+#    Toute section `postgresql:` / `redis:` / `minio:` fait ÉCHOUER l'install :
+#      "REMOVALS: The bundled PostgreSQL chart has been removed..."
+#    => 3 services EXTERNES obligatoires, préparés aux étapes A3-A6 du guide
+#       (docs/GITOPS-SETUP.md) : CNPG existant, Redis miniature, MinIO.
+#
+# 2. GitLab 19 EXIGE PostgreSQL 17 minimum. À vérifier AVANT (étape A2-bis).
+#
+# 3. Depuis GitLab 19.0, le chart route par défaut avec la GATEWAY API et installe
+#    Envoy Gateway (qui crée un Service LoadBalancer -> resterait Pending ici).
+#    On COUPE la Gateway API et on repasse en Ingress classique + Traefik :
+#      global.gatewayApi.enabled=false + global.ingress.enabled=true
+#    (Ingress est déprécié mais supporté jusqu'à GitLab 20.0 — doc officielle)
+#
+# 4. La clé pour ne pas installer cert-manager est `installCertmanager` (racine),
+#    et NON `certmanager.install` (qui est ignorée silencieusement depuis que le
+#    chart a renommé la clé). Cert-manager 1.15 est déjà dans le cluster.
+#
+# 5. PIÈGE HELM À TOUJOURS AVOIR EN TÊTE : une clé inconnue est ignorée
+#    SILENCIEUSEMENT, jamais d'erreur. D'où l'étape de contrôle après install :
+#    `kubectl get pods -n gitlab` (attendu ~15 pods, pas 25).
+#
+# Budget disques : 4 existants (pg×2, kafka, mongo) + gitaly + minio = 6/8.
+# (Redis en emptyDir volontairement ; le SQL est mutualisé sur le cluster `pg`.)
+# GitLab reste TEMPORAIRE : à désinstaller avant la phase 8 (guide, § nettoyage).
+# =============================================================================
+
+# --- 1. NE PAS installer cert-manager (déjà présent en 1.15 dans le cluster) ---
+installCertmanager: false
+# Le sous-chart certmanager-issuer, lui, reste rendu : il crée un ClusterIssuer.
+# Sans email il est invalide, donc on renseigne le tien.
+certmanager-issuer:
+  email: youssef.abidi69@gmail.com
+
+global:
+  edition: ce                    # Community Edition
+
+  # --- 2. Routage : on REFUSE la Gateway API, on VEUT de l'Ingress -----------
+  gatewayApi:
+    enabled: false               # <- sinon le chart installe Envoy Gateway (LB Pending)
+    installEnvoy: false
+    configureCertmanager: false
+
+  ingress:
+    enabled: true                # <- défaut du chart 19.x : false (Gateway API à la place)
+    class: traefik               # ton Traefik existant (DaemonSet hostPort 80/443)
+    provider: nginx              # valeur par défaut du chart, laissée telle quelle
+    configureCertmanager: false
+    tls:
+      enabled: false             # HTTP pour le 1er install (voir OPTION TLS plus bas)
+    # --- OPTION TLS (à faire APRÈS, quand l'install HTTP est verte) ---
+    # 1. passer global.hosts.https: true
+    # 2. décommenter ci-dessous + tls.enabled: true
+    # 3. helm upgrade ... (même -f, même --set)
+    # annotations:
+    #   cert-manager.io/cluster-issuer: letsencrypt-prod
+
+  hosts:
+    # nip.io = wildcard DNS public : *.nip.io résout vers l'IP demandée, zéro config.
+    # RAPPEL : le chart construit le hostname = "gitlab." + domain.
+    #   domain = 20.188.58.81.nip.io  ->  http://gitlab.20.188.58.81.nip.io
+    # à surcharger en ligne de commande : --set global.hosts.domain=${PUBLIC_IP}.nip.io
+    domain: PUBLIC_IP_PLACEHOLDER.nip.io
+    https: false
+
+  # --- 3. PostgreSQL EXTERNE : le cluster CNPG EXISTANT `pg` (namespace data)
+  # On réutilise le cluster qui héberge déjà order_db / payment_db / shipping_db :
+  # il est en PostgreSQL 18.4, et GitLab 19.3 sait tourner sur 18.4 (release
+  # notes 19.3 : « PostgreSQL 18.4 option available for fresh installs »).
+  # => 0 cluster de plus, 0 disque de plus. On ajoute juste une base vide.
+  #
+  # En DIRECT sur pg-rw, pas via le pooler PgBouncer : GitLab (migrations,
+  # locks transactionnels) n'aime pas le mode transaction de PgBouncer.
+  #
+  # PLAN B si les migrations refusent PG 18 : appliquer
+  # bootstrap/gitlab-cnpg-cluster.yaml (cluster PG 17.6 dédié dans ecommerce)
+  # et remplacer la ligne ci-dessous par :
+  #   host: pg-gitlab-rw.ecommerce.svc.cluster.local
+  # Clés doc : https://docs.gitlab.com/charts/advanced/external-db/
+  psql:
+    host: pg-rw.data.svc.cluster.local
+    port: 5432
+    database: gitlabhq_production
+    username: app
+    password:
+      useSecret: true
+      secret: gitlab-psql-password   # créé à l'étape A4 (copie du mot de passe de pg-app)
+      key: password
+
+  # --- 4. Redis EXTERNE : le Deployment miniature (gitlab-external-redis.yaml)
+  # !!! La clé est `auth`, PAS `password` (renommée : `global.redis.password`
+  # déclenche un avis de dépréciation ET est ignorée -> auth.enabled resterait
+  # à true et GitLab chercherait un secret de mot de passe inexistant).
+  # Doc : https://docs.gitlab.com/charts/advanced/external-redis/
+  redis:
+    host: redis.gitlab.svc.cluster.local
+    port: 6379
+    auth:
+      enabled: false             # pas d'auth : Redis n'est joignable que dans le cluster
+
+  # --- 5. Stockage objet S3 : notre MinIO single-node (étape A6) -------------
+  # Sans ça : artifacts CI, uploads, LFS, packages cassés.
+  # Les noms de buckets utilisés sont les DÉFAUTS du chart (gitlab-artifacts,
+  # git-lfs, gitlab-packages, gitlab-uploads, gitlab-mr-diffs,
+  # gitlab-terraform-state, gitlab-ci-secure-files, gitlab-dependency-proxy,
+  # gitlab-pages) -> le Job minio-make-buckets crée exactement ceux-là.
+  appConfig:
+    object_store:
+      enabled: true
+      proxy_download: true
+      connection:
+        secret: gitlab-object-storage
+        key: connection
+
+  # --- 6. Registry conteneur : coupé (les images restent sur GHCR) -----------
+  # Il faut les DEUX clés : `registry.enabled` empêche le déploiement du
+  # registry, `global.registry.enabled` empêche GitLab de chercher à lui parler
+  # (sinon : "Failed to open TCP connection to gitlab-registry:5000" à la
+  # suppression d'un projet).
+  registry:
+    enabled: false
+
+# --- 7. Composants coupés : chacun = des pods et de la RAM économisés --------
+registry:
+  enabled: false
+nginx-ingress:
+  enabled: false        # Traefik fait déjà office d'Ingress controller
+prometheus:
+  install: false        # la phase 8 aura son propre Prometheus
+gitlab-runner:
+  install: false        # installé à part (runner-values-dind.yaml) pour maîtriser le DinD
+gitlab-zoekt:
+  install: false        # recherche de code : inutile pour la démo (et lourd)
+ai-gateway:
+  install: false        # passerelle IA : hors sujet du stage
+# certmanager:
+#   install: false      # <- NE FONCTIONNE PAS (clé renommée) : voir installCertmanager plus haut
+
+gitlab:
+  kas:
+    enabled: false      # agent k8s inutile : c'est ArgoCD qui fait le lien git -> cluster
+  gitlab-exporter:
+    enabled: false      # métriques Prometheus (prometheus.install=false ci-dessus)
+
+  # --- 8. Ressources réduites : les défauts du chart sont trop gros pour B2s_v2
+  webservice:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests: {cpu: 100m, memory: 1Gi}
+      limits: {memory: 2Gi}
+  sidekiq:
+    resources:
+      requests: {cpu: 100m, memory: 600Mi}
+      limits: {memory: 1Gi}
+  gitaly:
+    resources:
+      requests: {cpu: 100m, memory: 400Mi}
+      limits: {memory: 1Gi}
+    persistence:
+      size: 10Gi
+      storageClass: azuredisk-ssd-retain
+  gitlab-shell:
+    resources:
+      requests: {cpu: 50m, memory: 100Mi}
+      limits: {memory: 256Mi}

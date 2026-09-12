@@ -1,0 +1,80 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8761
+      targetPort: 8761
+      name: http
+  selector:
+    app: service-registry
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-registry
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-registry
+  template:
+    metadata:
+      labels:
+        app: service-registry
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: service-registry
+          image: ghcr.io/youssefabidi69/service-registry:latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8761
+          envFrom:
+            - configMapRef:
+                name: ecommerce-common
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              memory: "768Mi"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8761
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8761
+            periodSeconds: 15
+            failureThreshold: 3

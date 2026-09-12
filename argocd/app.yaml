@@ -1,0 +1,36 @@
+# ArgoCD Application — app (8 microservices + UI + Ingress).
+# Vague 2 de l'app root : après data (les JVMs ont besoin de Postgres/Kafka/Mongo).
+#
+# PRÉREQUIS HORS GIT (2 Secrets créés à la main à l'étape B3, jamais commités) :
+#   1. ghcr-pull  dans ecommerce  (pull des images privées GHCR)
+#   2. pg-app     dans ecommerce  (mot de passe Postgres, recopié depuis data)
+# Détail du point 2 (piège cross-namespace) : voir app/secrets.README.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YoussefAbidi69/gitops-ecommerce.git
+    targetRevision: HEAD
+    path: app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ecommerce
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

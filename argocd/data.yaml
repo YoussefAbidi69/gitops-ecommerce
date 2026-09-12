@@ -1,0 +1,40 @@
+# ArgoCD Application — data (CloudNativePG, Strimzi Kafka, MongoDB).
+# Vague 1 de l'app root : après platform, avant app.
+#
+# PRÉREQUIS HORS GIT : les opérateurs CNPG et Strimzi doivent être installés
+# (leurs CRDs n'existent pas sinon et le sync échoue — le retry ci-dessous
+# absorbe un opérateur installé quelques minutes après ArgoCD, pas une absence).
+#   helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace
+#   helm install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+#     -n kafka --create-namespace --set watchNamespaces="{data}"
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YoussefAbidi69/gitops-ecommerce.git
+    targetRevision: HEAD
+    path: data
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Les CR CNPG/Kafka sont volumineuses : le client-side apply bute sur la
+      # limite de taille des annotations kubectl. ServerSideApply délègue au serveur.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

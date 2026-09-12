@@ -1,0 +1,40 @@
+# Géré par ArgoCD — source de vérité : ce repo gitops (ne plus éditer l'ancien k8s/).
+# Namespaces — step 2.3
+#
+#   kubectl apply -f k8s/platform/namespaces.yaml
+#
+# Two namespaces, split so that policy can differ between them. Once a
+# NetworkPolicy is added in phase 9, "only pods in `ecommerce` may reach port 5432
+# in `data`" is a three-line rule with this layout and impossible with everything
+# in `default`.
+#
+# Pod Security Admission labels are set now rather than retrofitted. Every image in
+# this project already runs as non-root UID 1001 (verified in phase 1), so the
+# stricter profile costs nothing today and would be painful to introduce later.
+#   enforce=baseline : blocks privileged pods, host namespaces, hostPath
+#   warn=restricted  : prints a warning for anything that would fail the strictest
+#                      profile, without blocking it
+#
+# `data` is only baseline-enforced: database operators legitimately need more
+# latitude than `restricted` allows.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    name: ecommerce
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    name: data
+    pod-security.kubernetes.io/enforce: baseline
