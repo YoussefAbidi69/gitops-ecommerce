@@ -16,6 +16,27 @@ resources:
 - ecommerce-ui.yaml
 - ingress.yaml
 images:
+- name: ghcr.io/youssefabidi69/api-gateway
+  newName: ghcr.io/youssefabidi69/api-gateway
+  newTag: e7d32ae7
+- name: ghcr.io/youssefabidi69/ecommerce-ui
+  newName: ghcr.io/youssefabidi69/ecommerce-ui
+  newTag: e7d32ae7
+- name: ghcr.io/youssefabidi69/inventory-service
+  newName: ghcr.io/youssefabidi69/inventory-service
+  newTag: e7d32ae7
+- name: ghcr.io/youssefabidi69/notification-service
+  newName: ghcr.io/youssefabidi69/notification-service
+  newTag: e7d32ae7
 - name: ghcr.io/youssefabidi69/order-service
   newName: ghcr.io/youssefabidi69/order-service
-  newTag: c89fc731
+  newTag: e7d32ae7
+- name: ghcr.io/youssefabidi69/payment-service
+  newName: ghcr.io/youssefabidi69/payment-service
+  newTag: e7d32ae7
+- name: ghcr.io/youssefabidi69/service-registry
+  newName: ghcr.io/youssefabidi69/service-registry
+  newTag: e7d32ae7
+- name: ghcr.io/youssefabidi69/shipping-service
+  newName: ghcr.io/youssefabidi69/shipping-service
+  newTag: e7d32ae7
