@@ -18,25 +18,25 @@ resources:
 images:
 - name: ghcr.io/youssefabidi69/api-gateway
   newName: ghcr.io/youssefabidi69/api-gateway
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/ecommerce-ui
   newName: ghcr.io/youssefabidi69/ecommerce-ui
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/inventory-service
   newName: ghcr.io/youssefabidi69/inventory-service
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/notification-service
   newName: ghcr.io/youssefabidi69/notification-service
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/order-service
   newName: ghcr.io/youssefabidi69/order-service
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/payment-service
   newName: ghcr.io/youssefabidi69/payment-service
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/service-registry
   newName: ghcr.io/youssefabidi69/service-registry
-  newTag: f1360c61
+  newTag: a04238b1
 - name: ghcr.io/youssefabidi69/shipping-service
   newName: ghcr.io/youssefabidi69/shipping-service
-  newTag: f1360c61
+  newTag: a04238b1
